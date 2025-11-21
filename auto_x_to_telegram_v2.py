@@ -21,6 +21,7 @@ import gc
 import feedparser
 from email.utils import parsedate_to_datetime
 from datetime import timezone, datetime
+import json
 
 load_dotenv()
 TWITTER_BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN")
@@ -49,6 +50,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CHECK_INTERVAL_SECONDS = 1000
 MAX_CAPTION_LENGTH = 1000  # 텔레그램 안전 범위
 TEXT_LENGTH_THRESHOLD = 250  # 크롤링을 시작할 텍스트 길이 임계값
+LAST_ID_JSON_PATH = os.path.join(BASE_DIR, "x_last_ids.json")
 # 특정 유저의 quoted 트윗은 제외할 때 쓰는 리스트
 EXCLUDE_QUOTE_USERS = [
     "105353526",            # markminervini
@@ -61,17 +63,52 @@ RSS_URL = "https://trumpstruth.org/feed"
 TRUMP_STATE_FILE = "trump_truth_last_ts.txt"
 TRUMP_USERNAME = "TruthSocial_Trump"
 
+def _load_last_ids() -> dict:
+    """x_last_ids.json에서 전체 매핑 불러오기"""
+    try:
+        with open(LAST_ID_JSON_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if isinstance(data, dict):
+                return data
+    except FileNotFoundError:
+        return {}
+    except Exception as e:
+        print(f"⚠️ last_ids.json 로드 오류: {e}")
+    return {}
+
+def _save_last_ids(data: dict):
+    """전체 매핑을 x_last_ids.json에 저장"""
+    try:
+        with open(LAST_ID_JSON_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+    except Exception as e:
+        print(f"⚠️ last_ids.json 저장 오류: {e}")
 
 def get_last_id(user_id: str) -> Optional[int]:
-    path = os.path.join(BASE_DIR, f"last_id_{user_id}.txt")
-    if os.path.exists(path):
-        with open(path, "r") as f:
-            content = f.read().strip()
-            if content:
-                return int(content)
-    return None
+    """
+    x_last_ids.json에서 해당 user_id의 last_id를 가져온다.
+    없으면 None.
+    """
+    data = _load_last_ids()
+    value = data.get(user_id)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 def save_last_id(user_id: str, tweet_id: int):
+    """
+    x_last_ids.json에 user_id -> tweet_id 매핑을 저장.
+    기존 값은 덮어씀.
+    """
+    data = _load_last_ids()
+    data[user_id] = int(tweet_id)
+    _save_last_ids(data)
+
     path = os.path.join(BASE_DIR, f"last_id_{user_id}.txt")
     with open(path, "w") as f:
         f.write(str(tweet_id))
