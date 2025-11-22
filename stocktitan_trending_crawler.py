@@ -41,7 +41,7 @@ HEADERS = {
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_TEST_CHANNEL_ID = os.getenv("TELEGRAM_TEST_CHANNEL_ID")
+TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID")
 
 RECENT_SEEN_LIMIT = 100
 RECENT_EXPIRE_DAYS = 7  # 7일 동안만 '이미 전송한 URL'로 간주
@@ -701,7 +701,7 @@ def send_to_telegram(message: str):
         send_text_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 
         response = requests.post(send_text_url, data={
-            "chat_id": TELEGRAM_TEST_CHANNEL_ID,
+            "chat_id": TELEGRAM_CHANNEL_ID,
             "text": message
         })
         response.raise_for_status()
