@@ -28,7 +28,7 @@ TWITTER_BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN")
 TWITTER_USERNAMES = os.getenv("TWITTER_USERNAMES", "").split(",")
 TWITTER_USER_IDS = os.getenv("TWITTER_USER_IDS", "").split(",")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_TEST_CHANNEL_ID = os.getenv("TELEGRAM_TEST_CHANNEL_ID")
+TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID")
 NAVER_CLIENT_ID = os.getenv("NAVER_CLIENT_ID")
 NAVER_CLIENT_SECRET = os.getenv("NAVER_CLIENT_SECRET")
 NAVER_INVOKE_URL = os.getenv("NAVER_INVOKE_URL")
@@ -689,7 +689,7 @@ def send_to_telegram_with_optional_image(message: str, image_urls: List[str]):
                 send_photo_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
                 if len(message) <= MAX_CAPTION_LENGTH:
                     photo_payload = {
-                        "chat_id": TELEGRAM_TEST_CHANNEL_ID,
+                        "chat_id": TELEGRAM_CHANNEL_ID,
                         "photo": image_urls[0],
                         "caption": message
                     }
@@ -699,13 +699,13 @@ def send_to_telegram_with_optional_image(message: str, image_urls: List[str]):
                 else:
                     # 메시지가 길면 사진만 보내고 텍스트 따로
                     response = requests.post(send_photo_url, data={
-                        "chat_id": TELEGRAM_TEST_CHANNEL_ID,
+                        "chat_id": TELEGRAM_CHANNEL_ID,
                         "photo": image_urls[0]
                     })
                     response.raise_for_status()
                     print("✅ 사진 전송 완료 (텍스트는 별도 전송)")
                     response = requests.post(send_text_url, data={
-                        "chat_id": TELEGRAM_TEST_CHANNEL_ID,
+                        "chat_id": TELEGRAM_CHANNEL_ID,
                         "text": message
                     })
                     response.raise_for_status()
@@ -720,7 +720,7 @@ def send_to_telegram_with_optional_image(message: str, image_urls: List[str]):
                         item["caption"] = message
                     media.append(item)
                 response = requests.post(send_group_url, json={
-                    "chat_id": TELEGRAM_TEST_CHANNEL_ID,
+                    "chat_id": TELEGRAM_CHANNEL_ID,
                     "media": media
                 })
                 response.raise_for_status()
@@ -728,7 +728,7 @@ def send_to_telegram_with_optional_image(message: str, image_urls: List[str]):
                 if len(message) > MAX_CAPTION_LENGTH:
                     # 캡션 길이 초과분은 별도 메시지 전송
                     response = requests.post(send_text_url, data={
-                        "chat_id": TELEGRAM_TEST_CHANNEL_ID,
+                        "chat_id": TELEGRAM_CHANNEL_ID,
                         "text": message
                     })
                     response.raise_for_status()
@@ -736,7 +736,7 @@ def send_to_telegram_with_optional_image(message: str, image_urls: List[str]):
         else:
             # 이미지가 없을 경우
             response = requests.post(send_text_url, data={
-                "chat_id": TELEGRAM_TEST_CHANNEL_ID,
+                "chat_id": TELEGRAM_CHANNEL_ID,
                 "text": message
             })
             response.raise_for_status()
@@ -796,7 +796,7 @@ def send_to_telegram_with_optional_image(message: str, image_urls: List[str]):
 def send_to_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
-        "chat_id": TELEGRAM_TEST_CHANNEL_ID,
+        "chat_id": TELEGRAM_CHANNEL_ID,
         "text": message
     }
     response = requests.post(url, data=payload)
