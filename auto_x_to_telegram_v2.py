@@ -73,7 +73,7 @@ def _load_last_ids() -> dict:
     except FileNotFoundError:
         return {}
     except Exception as e:
-        print(f"⚠️ last_ids.json 로드 오류: {e}")
+        print(f"⚠️ x_last_ids.json 로드 오류: {e}")
     return {}
 
 def _save_last_ids(data: dict):
@@ -108,12 +108,6 @@ def save_last_id(user_id: str, tweet_id: int):
     data = _load_last_ids()
     data[user_id] = int(tweet_id)
     _save_last_ids(data)
-
-    path = os.path.join(BASE_DIR, f"last_id_{user_id}.txt")
-    with open(path, "w") as f:
-        f.write(str(tweet_id))
-        f.flush()
-        os.fsync(f.fileno())
 
 def mask_newlines(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\n", NL_TOKEN)
