@@ -44,8 +44,7 @@ NL_TOKEN = "[[NL]]"
 # 초기 설정
 client = tweepy.Client(
     bearer_token=TWITTER_BEARER_TOKEN,
-    wait_on_rate_limit=True,  # 429일 때 자동 대기
-    timeout=15
+    wait_on_rate_limit=True  # 429일 때 자동 대기
 )
 _gpt_client = OpenAI(api_key=OPENAI_API_KEY)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
