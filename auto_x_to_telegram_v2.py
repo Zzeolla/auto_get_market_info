@@ -44,7 +44,8 @@ NL_TOKEN = "[[NL]]"
 # 초기 설정
 client = tweepy.Client(
     bearer_token=TWITTER_BEARER_TOKEN,
-    wait_on_rate_limit=True  # 429일 때 자동 대기
+    wait_on_rate_limit=True,  # 429일 때 자동 대기
+    timeout=15
 )
 _gpt_client = OpenAI(api_key=OPENAI_API_KEY)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -55,7 +56,7 @@ LAST_ID_JSON_PATH = os.path.join(BASE_DIR, "x_last_ids.json")
 HTTP_TIMEOUT = 10          # MyMemory, MS, DeepL, 텔레그램 등에 쓸 기본 HTTP 타임아웃
 TELEGRAM_TIMEOUT = 10      # 텔레그램 전송용
 OPENAI_TIMEOUT = 20        # GPT 번역용
-TWITTER_TIMEOUT = 15       # tweepy API 호출용
+
 # 특정 유저의 quoted 트윗은 제외할 때 쓰는 리스트
 EXCLUDE_QUOTE_USERS = [
     "105353526",            # markminervini
@@ -543,8 +544,7 @@ def get_latest_tweet(user_id, last_id=None, max_results=10):
         exclude=["replies", "retweets"],
         tweet_fields=["created_at", "id", "text", "attachments", "referenced_tweets"],
         expansions=["attachments.media_keys", "referenced_tweets.id"],
-        media_fields=["url", "type"],
-        timeout=TWITTER_TIMEOUT,
+        media_fields=["url", "type"]
     )
 
 def iterate_user_tweets(user_id: str, since_id: Optional[int], page_size: int = 10):
@@ -566,8 +566,7 @@ def iterate_user_tweets(user_id: str, since_id: Optional[int], page_size: int = 
             tweet_fields=["created_at", "id", "text", "attachments", "referenced_tweets"],
             expansions=["attachments.media_keys", "referenced_tweets.id"],
             media_fields=["url", "type"],
-            pagination_token=next_token,
-            timeout=TWITTER_TIMEOUT,
+            pagination_token=next_token
         )
 
         # 응답에 데이터가 없으면 종료
@@ -630,8 +629,7 @@ def fetch_original_retweet(tweet, client, username):
                     id=ref.id,
                     tweet_fields=["created_at", "text", "attachments"],
                     expansions=["attachments.media_keys"],
-                    media_fields=["url", "type"],
-                    time=TWITTER_TIMEOUT,
+                    media_fields=["url", "type"]
                 )
 
                 print(response.data)
@@ -849,8 +847,7 @@ def bootstrap_warm_start(user_id: str, username: str):
             id=user_id,
             max_results=5,  # 최소값 5
             exclude=["replies", "retweets"],
-            tweet_fields=["id", "created_at"],
-            timeout=TWITTER_TIMEOUT,
+            tweet_fields=["id", "created_at"]
         )
         if not resp.data:
             # 트윗 자체가 없을 수도 있으니 0으로 마킹
@@ -1169,8 +1166,7 @@ def debug_single_tweet(tweet_id: str, username: str):
             id=tweet_id,
             tweet_fields=["created_at","text","attachments","referenced_tweets"],
             expansions=["attachments.media_keys","referenced_tweets.id"],
-            media_fields=["url","type"],
-            timeout=TWITTER_TIMEOUT,
+            media_fields=["url","type"]
         )
         tweet = resp.data
         print("🔎 Debug Tweet")
