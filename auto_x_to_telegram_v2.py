@@ -6,6 +6,7 @@ import tweepy
 from tweepy.errors import TweepyException, TooManyRequests, HTTPException as TweepyHTTPException
 from typing import Optional, List
 import requests
+from requests.exceptions import RequestException, Timeout
 import re
 # from googletrans import Translator
 from openai import OpenAI
@@ -51,6 +52,10 @@ CHECK_INTERVAL_SECONDS = 1000
 MAX_CAPTION_LENGTH = 1000  # 텔레그램 안전 범위
 TEXT_LENGTH_THRESHOLD = 250  # 크롤링을 시작할 텍스트 길이 임계값
 LAST_ID_JSON_PATH = os.path.join(BASE_DIR, "x_last_ids.json")
+HTTP_TIMEOUT = 10          # MyMemory, MS, DeepL, 텔레그램 등에 쓸 기본 HTTP 타임아웃
+TELEGRAM_TIMEOUT = 10      # 텔레그램 전송용
+OPENAI_TIMEOUT = 20        # GPT 번역용
+TWITTER_TIMEOUT = 15       # tweepy API 호출용
 # 특정 유저의 quoted 트윗은 제외할 때 쓰는 리스트
 EXCLUDE_QUOTE_USERS = [
     "105353526",            # markminervini
@@ -377,16 +382,22 @@ def translate_with_gpt4omini(text: str, target_lang: str = "ko", source_lang: st
     else:
         user_msg = f"Target language: {target_lang}\n\nText:\n{text}"
 
-    resp = _gpt_client.chat.completions.create(
-        model="gpt-4o-mini",
-        temperature=0,
-        messages=[
-            {"role": "system", "content": system_msg},
-            {"role": "user", "content": user_msg},
-        ],
-    )
-    out = resp.choices[0].message.content or ""
-    return out.strip()
+    try:
+        resp = _gpt_client.chat.completions.create(
+            model="gpt-4o-mini",
+            temperature=0,
+            messages=[
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": user_msg},
+            ],
+            timeout=OPENAI_TIMEOUT,
+        )
+        out = resp.choices[0].message.content or ""
+        return out.strip()
+    except Exception as e:
+        print(f"⚠️ GPT 번역 실패: {e}")
+        # translate() 쪽에서 다음 엔진으로 넘어가게 하기 위해 예외 유지
+        raise
 
 def translate_with_mymemory(text, source="en", target="ko"):
     # 480자 이상이면 문장 단위로 분할하여 번역
@@ -434,14 +445,19 @@ def translate_mymemory_part(text, source="en", target="ko"):
         "langpair": f"{source}|{target}"
     }
 
-    response = requests.get(url, params=params, timeout=5)
-    data = response.json()
-    result = data["responseData"]["translatedText"]
+    try:
+        response = requests.get(url, params=params, timeout=HTTP_TIMEOUT)
+        response.raise_for_status()
+        data = response.json()
+        result = data["responseData"]["translatedText"]
 
-    if "MYMEMORY WARNING" in result.upper():
-        raise Exception("MyMemory usage limit reached")
+        if "MYMEMORY WARNING" in result.upper():
+            raise Exception("MyMemory usage limit reached")
 
-    return result
+        return result
+    except (RequestException, Timeout) as e:
+        print(f"⚠️ MyMemory 요청 실패: {e}")
+        raise
 
 def split_text_into_sentences(text):
     """텍스트를 문장 단위로 분할"""
@@ -482,11 +498,15 @@ def translate_with_microsoft(text):
         "Content-type": "application/json"
     }
     body = [{"text": text}]
-    response = requests.post(url, headers=headers, json=body)
-    if response.status_code == 429:
-        raise Exception("Microsoft usage limit exceeded")
-    response.raise_for_status()
-    return response.json()[0]["translations"][0]["text"]
+    try:
+        response = requests.post(url, headers=headers, json=body, timeout=HTTP_TIMEOUT)
+        if response.status_code == 429:
+            raise Exception("Microsoft usage limit exceeded")
+        response.raise_for_status()
+        return response.json()[0]["translations"][0]["text"]
+    except (RequestException, Timeout) as e:
+        print(f"⚠️ Microsoft Translator 요청 실패: {e}")
+        raise
 
 def translate_with_deepl(text):
     url = "https://api-free.deepl.com/v2/translate"
@@ -495,11 +515,15 @@ def translate_with_deepl(text):
         "text": text,
         "target_lang": "KO",  # 한국어
     }
-    response = requests.post(url, headers=headers, data=data)
-    if response.status_code == 456:
-        raise Exception("DeepL usage limit exceeded")
-    response.raise_for_status()
-    return response.json()["translations"][0]["text"]
+    try:
+        response = requests.post(url, headers=headers, data=data, timeout=HTTP_TIMEOUT)
+        if response.status_code == 456:
+            raise Exception("DeepL usage limit exceeded")
+        response.raise_for_status()
+        return response.json()["translations"][0]["text"]
+    except (RequestException, Timeout) as e:
+        print(f"⚠️ DeepL 요청 실패: {e}")
+        raise
 
 def extract_emojis(text):
     emojis = EMOJI_PATTERN.findall(text)
@@ -519,7 +543,8 @@ def get_latest_tweet(user_id, last_id=None, max_results=10):
         exclude=["replies", "retweets"],
         tweet_fields=["created_at", "id", "text", "attachments", "referenced_tweets"],
         expansions=["attachments.media_keys", "referenced_tweets.id"],
-        media_fields=["url", "type"]
+        media_fields=["url", "type"],
+        timeout=TWITTER_TIMEOUT,
     )
 
 def iterate_user_tweets(user_id: str, since_id: Optional[int], page_size: int = 10):
@@ -541,7 +566,8 @@ def iterate_user_tweets(user_id: str, since_id: Optional[int], page_size: int = 
             tweet_fields=["created_at", "id", "text", "attachments", "referenced_tweets"],
             expansions=["attachments.media_keys", "referenced_tweets.id"],
             media_fields=["url", "type"],
-            pagination_token=next_token
+            pagination_token=next_token,
+            timeout=TWITTER_TIMEOUT,
         )
 
         # 응답에 데이터가 없으면 종료
@@ -604,7 +630,8 @@ def fetch_original_retweet(tweet, client, username):
                     id=ref.id,
                     tweet_fields=["created_at", "text", "attachments"],
                     expansions=["attachments.media_keys"],
-                    media_fields=["url", "type"]
+                    media_fields=["url", "type"],
+                    time=TWITTER_TIMEOUT,
                 )
 
                 print(response.data)
@@ -687,21 +714,23 @@ def send_to_telegram_with_optional_image(message: str, image_urls: List[str]):
                         "photo": image_urls[0],
                         "caption": message
                     }
-                    response = requests.post(send_photo_url, data=photo_payload)
+                    response = requests.post(send_photo_url, data=photo_payload, timeout=TELEGRAM_TIMEOUT)
                     response.raise_for_status()
                     print("✅ 사진+메시지 전송 완료")
                 else:
                     # 메시지가 길면 사진만 보내고 텍스트 따로
-                    response = requests.post(send_photo_url, data={
-                        "chat_id": TELEGRAM_CHANNEL_ID,
-                        "photo": image_urls[0]
-                    })
+                    response = requests.post(
+                        send_photo_url,
+                        data={"chat_id": TELEGRAM_CHANNEL_ID, "photo": image_urls[0]},
+                        timeout=TELEGRAM_TIMEOUT,
+                    )
                     response.raise_for_status()
                     print("✅ 사진 전송 완료 (텍스트는 별도 전송)")
-                    response = requests.post(send_text_url, data={
-                        "chat_id": TELEGRAM_CHANNEL_ID,
-                        "text": message
-                    })
+                    response = requests.post(
+                        send_text_url,
+                        data={"chat_id": TELEGRAM_CHANNEL_ID,"text": message},
+                        timeout=TELEGRAM_TIMEOUT,
+                    )
                     response.raise_for_status()
                     print("✅ 텍스트 전송 완료")
             else:
@@ -713,28 +742,34 @@ def send_to_telegram_with_optional_image(message: str, image_urls: List[str]):
                     if i == 0 and len(message) <= MAX_CAPTION_LENGTH:
                         item["caption"] = message
                     media.append(item)
-                response = requests.post(send_group_url, json={
-                    "chat_id": TELEGRAM_CHANNEL_ID,
-                    "media": media
-                })
+                response = requests.post(
+                    send_group_url,
+                    json={"chat_id": TELEGRAM_CHANNEL_ID, "media": media},
+                    timeout=TELEGRAM_TIMEOUT,
+                )
                 response.raise_for_status()
                 print(f"✅ 사진 {len(media)}장 전송 완료 (첫 장에만 캡션)")
                 if len(message) > MAX_CAPTION_LENGTH:
                     # 캡션 길이 초과분은 별도 메시지 전송
-                    response = requests.post(send_text_url, data={
-                        "chat_id": TELEGRAM_CHANNEL_ID,
-                        "text": message
-                    })
+                    response = requests.post(
+                        send_text_url,
+                        data={"chat_id": TELEGRAM_CHANNEL_ID,"text": message},
+                        timeout=TELEGRAM_TIMEOUT,
+                    )
                     response.raise_for_status()
                     print("✅ 추가 텍스트 전송 완료")
         else:
             # 이미지가 없을 경우
-            response = requests.post(send_text_url, data={
-                "chat_id": TELEGRAM_CHANNEL_ID,
-                "text": message
-            })
+            response = requests.post(
+                send_text_url,
+                data={"chat_id": TELEGRAM_CHANNEL_ID, "text": message},
+                timeout=TELEGRAM_TIMEOUT,
+            )
             response.raise_for_status()
             print("✅ 텍스트 전송 완료 (이미지 없음)")
+    except (RequestException, Timeout) as e:
+        print("❌ 전송 실패(네트워크/타임아웃):", e)
+        print("📦 실패한 메시지:", message)
     except Exception as e:
         print("❌ 전송 실패:", e)
         print("📦 실패한 메시지:", message)
@@ -793,8 +828,15 @@ def send_to_telegram(message):
         "chat_id": TELEGRAM_CHANNEL_ID,
         "text": message
     }
-    response = requests.post(url, data=payload)
-    response.raise_for_status()
+    try:
+        response = requests.post(url, data=payload, timeout=TELEGRAM_TIMEOUT)
+        response.raise_for_status()
+    except (RequestException, Timeout) as e:
+        print("❌ 텔레그램 전송 실패(네트워크/타임아웃):", e)
+        print("📦 실패한 메시지:", message)
+    except Exception as e:
+        print("❌ 텔레그램 전송 실패(기타):", e)
+        print("📦 실패한 메시지:", message)
 
 def bootstrap_warm_start(user_id: str, username: str):
     """
@@ -807,7 +849,8 @@ def bootstrap_warm_start(user_id: str, username: str):
             id=user_id,
             max_results=5,  # 최소값 5
             exclude=["replies", "retweets"],
-            tweet_fields=["id", "created_at"]
+            tweet_fields=["id", "created_at"],
+            timeout=TWITTER_TIMEOUT,
         )
         if not resp.data:
             # 트윗 자체가 없을 수도 있으니 0으로 마킹
@@ -1126,7 +1169,8 @@ def debug_single_tweet(tweet_id: str, username: str):
             id=tweet_id,
             tweet_fields=["created_at","text","attachments","referenced_tweets"],
             expansions=["attachments.media_keys","referenced_tweets.id"],
-            media_fields=["url","type"]
+            media_fields=["url","type"],
+            timeout=TWITTER_TIMEOUT,
         )
         tweet = resp.data
         print("🔎 Debug Tweet")
