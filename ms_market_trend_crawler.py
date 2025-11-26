@@ -607,9 +607,7 @@ def run_once() -> None:
 
             logging.info("메시지 최종 길이: %d chars", len(msg))
 
-            print(msg)
-
-            # send_to_telegram(msg)
+            send_to_telegram(msg)
             add_recent_seen([url])
 
             # 너무 잦은 요청을 피하기 위해 항목 사이 약간 쉬어가기
