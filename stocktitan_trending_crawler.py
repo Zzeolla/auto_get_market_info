@@ -13,6 +13,7 @@ import textwrap
 from dotenv import load_dotenv
 
 import requests
+from requests.exceptions import RequestException, Timeout
 from bs4 import BeautifulSoup, Tag
 
 TRENDING_URL = "https://www.stocktitan.net/news/trending.html"
@@ -45,6 +46,9 @@ TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID")
 
 RECENT_SEEN_LIMIT = 100
 RECENT_EXPIRE_DAYS = 7  # 7일 동안만 '이미 전송한 URL'로 간주
+HTTP_TIMEOUT = 20      # StockTitan GET요청용
+OPENAI_TIMEOUT = 30    # GPT 번역용(이미 30초 쓰고 있었음)
+TELEGRAM_TIMEOUT = 10  # 텔레그램 전송용
 
 logging.basicConfig(
     level=logging.INFO,
@@ -174,7 +178,7 @@ def translate_with_gpt4omini(text: str, target_lang: str = "ko", source_lang: Op
                     {"role": "user", "content": user_msg},
                 ],
             },
-            timeout=30,
+            timeout=OPENAI_TIMEOUT,
         )
         resp.raise_for_status()
         out = (resp.json()["choices"][0]["message"]["content"] or "").strip()
@@ -191,8 +195,13 @@ def translate_text(text: str, target_lang: str = "ko") -> str:
 #    - rank/title/ticker/url + (가능하면) 트렌딩 카드에 있는 rhea 요약/긍/부정
 # ─────────────────────────────────────────────────────────────────────────────
 def fetch_trending_top7() -> List[Dict]:
-    resp = requests.get(TRENDING_URL, headers=HEADERS, timeout=20)
-    resp.raise_for_status()
+    try:
+        resp = requests.get(TRENDING_URL, headers=HEADERS, timeout=HTTP_TIMEOUT)
+        resp.raise_for_status()
+    except (RequestException, Timeout) as e:
+        logging.error(f"[fetch_trending_top7] 요청 실패: {e}")
+        return []
+    
     soup = BeautifulSoup(resp.text, "html.parser")
 
     items: List[Dict] = []
@@ -462,8 +471,25 @@ def dedup_list(xs: List[str]) -> List[str]:
 #    - 기사 본문을 섹션/헤더(굵게/제목) 포함하여 구조적으로 추출
 # ─────────────────────────────────────────────────────────────────────────────
 def parse_article_detail(url: str) -> Dict:
-    resp = requests.get(url, headers=HEADERS, timeout=20)
-    resp.raise_for_status()
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=HTTP_TIMEOUT)
+        resp.raise_for_status()
+    except (RequestException, Timeout) as e:
+        logging.error(f"[parse_article_detail] 요청 실패 ({url}): {e}")
+        return {
+            "title": "",
+            "published_at": None,
+            "source_url": None,
+            "detail": {
+                "summary_ko": None,
+                "summary_en": None,
+                "positive": [],
+                "negative": [],
+                "insights": [],
+            },
+            "body": [],
+        }
+    
     soup = BeautifulSoup(resp.text, "html.parser")
 
     # 메타
@@ -700,16 +726,24 @@ def send_to_telegram(message: str):
     try:
         send_text_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 
-        response = requests.post(send_text_url, data={
-            "chat_id": TELEGRAM_CHANNEL_ID,
-            "text": message
-        })
+        response = requests.post(
+            send_text_url,
+            data={
+                "chat_id": TELEGRAM_CHANNEL_ID,
+                "text": message
+            },
+            timeout=TELEGRAM_TIMEOUT,
+        )
         response.raise_for_status()
         print("✅ 텍스트 전송 완료")
+    
+    except (RequestException, Timeout) as e:
+        print("❌ 전송 실패(네트워크/타임아웃):", e)
+        print("📦 실패한 메시지:", message[:300], "...")
 
     except Exception as e:
-        print("❌ 전송 실패:", e)
-        print("📦 실패한 메시지:", message)
+        print("❌ 전송 실패(기타):", e)
+        print("📦 실패한 메시지:", message[:300], "...")
 
 if __name__ == "__main__":
 

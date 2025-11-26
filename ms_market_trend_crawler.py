@@ -8,6 +8,7 @@ from urllib.parse import urljoin
 from dotenv import load_dotenv
 import re
 import requests
+from requests.exceptions import RequestException, Timeout
 from bs4 import BeautifulSoup, Tag
 from openai import OpenAI
 
@@ -23,6 +24,10 @@ MS_API_URL = "https://www.morganstanley.com/insights/topics/market-trends.insigh
 STATE_FILE = "ms_market_trends_state.json"   # 최근 전송 URL 저장용
 MAX_TG_CHARS = 3800                          # 텔레그램 메시지 전체 길이 제한
 MAX_TOTAL = 3800
+
+HTTP_TIMEOUT = 20        # Morgan Stanley/텔레그램용 기본 HTTP 타임아웃
+OPENAI_TIMEOUT = 30      # OpenAI 요약/번역 타임아웃
+TELEGRAM_TIMEOUT = 15    # 텔레그램 전송 타임아웃
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -108,6 +113,7 @@ def summarize_and_translate(text: str, max_chars: int = 3800) -> str:
             {"role": "user", "content": prompt},
         ],
         temperature=0.2,
+        timeout=OPENAI_TIMEOUT,
     )
 
     answer = resp.choices[0].message.content.strip()
@@ -150,6 +156,7 @@ def translate_takeaways(takeaways: list[str], max_chars: int = 1200) -> str:
             {"role": "user", "content": prompt},
         ],
         temperature=0.1,
+        timeout=OPENAI_TIMEOUT,
     )
 
     answer = resp.choices[0].message.content.strip()
@@ -178,6 +185,7 @@ def translate_title(text: str, max_chars: int = 200) -> str:
             {"role": "user", "content": prompt},
         ],
         temperature=0.1,
+        timeout=OPENAI_TIMEOUT,
     )
     answer = resp.choices[0].message.content.strip()
     if len(answer) > max_chars:
@@ -194,14 +202,22 @@ def send_to_telegram(message: str) -> None:
 
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        resp = requests.post(url, data={
-            "chat_id": TELEGRAM_CHANNEL_ID,
-            "text": message,
-        }, timeout=20)
+        resp = requests.post(
+            url,
+            data={
+                "chat_id": TELEGRAM_CHANNEL_ID,
+                "text": message,
+            },
+            timeout=TELEGRAM_TIMEOUT,
+        )
         resp.raise_for_status()
         logging.info("✅ 텔레그램 전송 완료")
+
+    except (RequestException, Timeout) as e:
+        logging.exception(f"❌ 텔레그램 전송 실패(네트워크/타임아웃): {e}")
+        logging.error("📦 실패한 메시지 일부: %s", message[:200])
     except Exception as e:
-        logging.exception(f"❌ 텔레그램 전송 실패: {e}")
+        logging.exception(f"❌ 텔레그램 전송 실패(기타): {e}")
         logging.error("📦 실패한 메시지 일부: %s", message[:200])
 
 # ─────────────────────────────────────────
@@ -213,12 +229,12 @@ def normalize_url(href: str) -> str:
     return urljoin(BASE_URL, href)
 
 def get_soup(url: str) -> BeautifulSoup:
-    resp = requests.get(url, headers=HEADERS, timeout=30)
+    resp = requests.get(url, headers=HEADERS, timeout=HTTP_TIMEOUT)
     resp.raise_for_status()
     return BeautifulSoup(resp.text, "html.parser")
 
 def fetch_soup(url: str) -> BeautifulSoup:
-    resp = requests.get(url, headers=HEADERS, timeout=20)
+    resp = requests.get(url, headers=HEADERS, timeout=HTTP_TIMEOUT)
     resp.raise_for_status()
     return BeautifulSoup(resp.text, "html.parser")
 
@@ -233,8 +249,13 @@ def fetch_listing() -> List[Dict]:
     반환: [{title, url, kind}, ...]
         kind ∈ {"article", "podcast"}
     """
-    resp = requests.get(MS_API_URL, headers=HEADERS, timeout=20)
-    resp.raise_for_status()
+    try:
+        resp = requests.get(MS_API_URL, headers=HEADERS, timeout=HTTP_TIMEOUT)
+        resp.raise_for_status()
+    except (RequestException, Timeout) as e:
+        logging.error(f"[fetch_listing] 요청 실패: {e}")
+        return []
+    
     data = resp.json()
 
     if not isinstance(data, list):
