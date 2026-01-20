@@ -59,17 +59,18 @@ def init_driver():
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
 
-    options.add_argument(
-        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    ua = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/120.0.0.0 Safari/537.36"
     )
+    options.add_argument(f"--user-agent={ua}")   # ✅ 핵심 수정
 
-    # ★ 여기에서 현재 크롬 메이저 버전(142)을 지정해 준다
     driver = uc.Chrome(
-        version_main=142,   # ← 현재 크롬 메이저 버전
+        # version_main=142,  # 일단 주석 추천 (아래 설명)
         options=options,
     )
+
     driver.set_page_load_timeout(30)
     return driver
 
