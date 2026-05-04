@@ -252,39 +252,60 @@ def fetch_listing() -> List[Dict]:
     try:
         resp = requests.get(MS_API_URL, headers=HEADERS, timeout=HTTP_TIMEOUT)
         resp.raise_for_status()
+        data = resp.json()
+
     except (RequestException, Timeout) as e:
         logging.error(f"[fetch_listing] 요청 실패: {e}")
         return []
-    
-    data = resp.json()
+    except json.JSONDecodeError as e:
+        logging.error(f"[fetch_listing] JSON 파싱 실패: {e}")
+        logging.error("응답 일부: %s", resp.text[:500])
+        return []
 
-    if not isinstance(data, list):
+    # ✅ 기존: data가 list라고 가정
+    # ✅ 변경: 최근 Morgan Stanley 응답은 {"articles": [...]} 형태
+    if isinstance(data, list):
+        rows = data
+
+    elif isinstance(data, dict):
+        logging.info("JSON 최상위 keys: %s", list(data.keys()))
+
+        rows = (
+            data.get("articles")
+            or data.get("items")
+            or data.get("results")
+            or data.get("data")
+            or []
+        )
+
+        if not isinstance(rows, list):
+            logging.warning("articles/items/results/data가 list가 아닙니다: %s", type(rows))
+            return []
+
+    else:
         logging.warning("예상과 다른 JSON 구조입니다: %s", type(data))
         return []
 
     items: List[Dict] = []
 
-    for row in data:
+    for row in rows:
         if not isinstance(row, dict):
             continue
 
         page_url = row.get("pageUrl") or ""
         title = (row.get("title") or "").strip()
-        media_type = row.get("mediaType") or ""
+        media_type = (row.get("mediaType") or "").lower()
 
         if not page_url or not title:
             continue
 
-        # 전체 URL 보정
         url = page_url if page_url.startswith("http") else normalize_url(page_url)
 
-        # article / podcast 판별
-        if "/insights/articles/" in url:
+        if "/insights/articles/" in url or "article" in media_type:
             kind = "article"
         elif "/insights/podcasts/" in url or "podcast" in media_type:
             kind = "podcast"
         else:
-            # 우리가 원하는 컨텐츠 타입이 아니면 패스
             continue
 
         items.append({
@@ -293,7 +314,6 @@ def fetch_listing() -> List[Dict]:
             "kind": kind,
         })
 
-        # ✅ 최대 4개만 사용
         if len(items) >= 4:
             break
 
