@@ -50,6 +50,40 @@ HEADERS = {
 
 
 # ─────────────────────────────────────────────
+# 현재 설치된 Chrome 메이저 버전 자동 감지 (Windows)
+# ─────────────────────────────────────────────
+def get_installed_chrome_major_version() -> int | None:
+    import subprocess
+    import winreg
+
+    # 1) 레지스트리에서 시도
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Google\Chrome\BLBeacon")
+        version, _ = winreg.QueryValueEx(key, "version")
+        return int(version.split(".")[0])
+    except Exception:
+        pass
+
+    # 2) chrome.exe --version 커맨드로 시도
+    paths = [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    ]
+    for p in paths:
+        try:
+            out = subprocess.check_output([p, "--version"], stderr=subprocess.STDOUT)
+            text = out.decode(errors="ignore")
+            # 예: "Google Chrome 149.0.7827.156"
+            m = re.search(r"(\d+)\.\d+\.\d+\.\d+", text)
+            if m:
+                return int(m.group(1))
+        except Exception:
+            continue
+
+    return None
+
+
+# ─────────────────────────────────────────────
 # Selenium 드라이버 초기화
 # ─────────────────────────────────────────────
 def init_driver():
@@ -63,7 +97,17 @@ def init_driver():
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/120.0.0.0 Safari/537.36"
     )
-    driver = uc.Chrome(options=options)
+
+    # 설치된 Chrome 버전을 자동 감지해서 ChromeDriver와 맞춤
+    # (Chrome 자동 업데이트로 버전이 바뀌어도 수동 수정 불필요)
+    version_main = get_installed_chrome_major_version()
+    if version_main:
+        logging.info(f"감지된 Chrome 메이저 버전: {version_main}")
+        driver = uc.Chrome(options=options, version_main=version_main)
+    else:
+        logging.warning("Chrome 버전을 자동 감지하지 못했습니다. 기본 동작으로 시도합니다.")
+        driver = uc.Chrome(options=options)
+
     driver.set_page_load_timeout(30)
     return driver
 
